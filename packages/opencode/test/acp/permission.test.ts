@@ -46,6 +46,7 @@ function makeSessionService() {
 function createHarness(
   requestPermission: (params: RequestPermissionRequest) => Promise<RequestPermissionResponse> = () =>
     Promise.resolve({ outcome: { outcome: "selected", optionId: "once" } }),
+  parentIDs: Record<string, string | undefined> = {},
 ) {
   const replies: PermissionReplyParams[] = []
   const requests: RequestPermissionRequest[] = []
@@ -60,6 +61,8 @@ function createHarness(
     },
     session: {
       message: () => Promise.resolve({ data: undefined }),
+      get: ({ sessionID }: { sessionID: string }) =>
+        Promise.resolve({ data: parentIDs[sessionID] ? { parentID: parentIDs[sessionID] } : undefined }),
     },
   } as unknown as OpencodeClient
   const connection = {
@@ -181,6 +184,20 @@ describe("acp permissions", () => {
       ],
     })
     expect(harness.replies).toEqual([{ requestID: "perm_1", reply: "once", directory: "/workspace" }])
+  })
+
+  it("forwards a child session permission through its registered ACP ancestor", async () => {
+    const harness = createHarness(() => Promise.resolve({ outcome: { outcome: "selected", optionId: "once" } }), {
+      ses_child: "ses_root",
+    })
+    await createSession(harness.session, "ses_root")
+
+    harness.subscription.handle(permissionAsked("ses_child", "perm_child"))
+
+    await pollUntil(() => harness.replies.length === 1, "child permission was never replied")
+
+    expect(harness.requests[0]?.sessionId).toBe("ses_child")
+    expect(harness.replies).toEqual([{ requestID: "perm_child", reply: "once", directory: "/workspace" }])
   })
 
   it("uses permission metadata for non-shell titles", async () => {

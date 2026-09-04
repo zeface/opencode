@@ -229,4 +229,29 @@ function partMetadataKey(input: { messageId: string; partId: string }) {
   return `${input.messageId}:${input.partId}`
 }
 
+const MAX_ANCESTOR_DEPTH = 8
+
+/**
+ * Resolve a server-created child session to its nearest registered ACP
+ * ancestor.  Child sessions created by the task tool are not ACP sessions,
+ * but their permission requests still need the root session's connection.
+ */
+export function resolveAncestor(input: {
+  readonly tryGet: (sessionId: string) => Effect.Effect<Info | undefined>
+  readonly fetchParentID: (sessionId: string) => Promise<string | undefined>
+  readonly sessionId: string
+}): Effect.Effect<Info | undefined> {
+  return Effect.gen(function* () {
+    let current = input.sessionId
+    for (let depth = 0; depth < MAX_ANCESTOR_DEPTH; depth++) {
+      const known = yield* input.tryGet(current)
+      if (known) return known
+      const parentID = yield* Effect.promise(() => input.fetchParentID(current))
+      if (!parentID || parentID === current) return undefined
+      current = parentID
+    }
+    return undefined
+  })
+}
+
 export * as ACPSession from "./session"
